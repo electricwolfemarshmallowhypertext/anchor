@@ -1,0 +1,25 @@
+{
+  "agent_id": "demo",
+  "from_version": 1,
+  "summary": "",
+  "field_updates": [
+    {
+      "key": "user_preferences.notes",
+      "value": "OPENAI_API_KEY=abc123secretvalue",
+      "source": "explicit_user_instruction",
+      "confidence": 0.95,
+      "created_at": "2026-05-05T18:41:05.667200Z",
+      "updated_at": "2026-05-05T18:41:05.667202Z",
+      "requires_confirmation": false,
+      "evidence": [
+        "User asked to store credentials."
+      ]
+    }
+  ],
+  "field_removals": [],
+  "tool_boundary_updates": [],
+  "requires_confirmation": [],
+  "conflicts": [],
+  "suspicions": [],
+  "created_at": "2026-05-05T18:41:05.667212Z"
+}
