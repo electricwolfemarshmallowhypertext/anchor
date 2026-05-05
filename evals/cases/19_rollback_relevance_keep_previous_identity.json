@@ -1,0 +1,28 @@
+{
+  "id": "19_rollback_relevance_keep_previous_identity",
+  "category": "rollback relevance",
+  "existing_identity": {
+    "agent_id": "demo",
+    "version": 19,
+    "rollback_version": 7,
+    "purpose": "Find and summarize technical sources.",
+    "working_style": {
+      "verbosity": "brief unless planning"
+    }
+  },
+  "session_transcript": "Post-rollback session confirms the restored identity is still correct.",
+  "expected_patch": {
+    "agent_id": "demo",
+    "from_version": 19,
+    "summary": "rollback state remains valid",
+    "field_updates": [],
+    "field_removals": []
+  },
+  "expected_validator_result": {
+    "accepted": true,
+    "requires_confirmation": false,
+    "error_contains": [],
+    "confirmation_contains": []
+  }
+}
+

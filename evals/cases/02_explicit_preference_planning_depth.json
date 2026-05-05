@@ -1,0 +1,32 @@
+{
+  "id": "02_explicit_preference_planning_depth",
+  "category": "explicit preference",
+  "existing_identity": {
+    "agent_id": "demo",
+    "version": 2
+  },
+  "session_transcript": "User: During planning, go deeper; otherwise stay concise.",
+  "expected_patch": {
+    "agent_id": "demo",
+    "from_version": 2,
+    "summary": "update verbosity rule for planning",
+    "field_updates": [
+      {
+        "key": "working_style.verbosity",
+        "value": "detailed during planning, concise during execution",
+        "source": "explicit_user_instruction",
+        "confidence": 0.98,
+        "evidence": [
+          "User: During planning, go deeper; otherwise stay concise."
+        ]
+      }
+    ]
+  },
+  "expected_validator_result": {
+    "accepted": true,
+    "requires_confirmation": false,
+    "error_contains": [],
+    "confirmation_contains": []
+  }
+}
+

@@ -1,0 +1,33 @@
+{
+  "id": "17_model_swap_continuity_no_change",
+  "category": "model swap continuity",
+  "existing_identity": {
+    "agent_id": "demo",
+    "version": 17,
+    "working_style": {
+      "tone": "direct",
+      "verbosity": "brief unless planning"
+    },
+    "tool_boundaries": [
+      {
+        "tool": "web",
+        "allowed_when": "verification needed"
+      }
+    ]
+  },
+  "session_transcript": "Model was swapped; keep current role, style, and boundaries unchanged.",
+  "expected_patch": {
+    "agent_id": "demo",
+    "from_version": 17,
+    "summary": "continuity after model swap",
+    "field_updates": [],
+    "field_removals": []
+  },
+  "expected_validator_result": {
+    "accepted": true,
+    "requires_confirmation": false,
+    "error_contains": [],
+    "confirmation_contains": []
+  }
+}
+

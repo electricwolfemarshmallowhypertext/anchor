@@ -1,0 +1,32 @@
+{
+  "id": "01_explicit_preference_concise",
+  "category": "explicit preference",
+  "existing_identity": {
+    "agent_id": "demo",
+    "version": 1
+  },
+  "session_transcript": "User: Keep responses concise and technical by default.",
+  "expected_patch": {
+    "agent_id": "demo",
+    "from_version": 1,
+    "summary": "capture concise style preference",
+    "field_updates": [
+      {
+        "key": "user_preferences.prefers_laconic_technical_answers",
+        "value": true,
+        "source": "explicit_user_instruction",
+        "confidence": 0.99,
+        "evidence": [
+          "User: Keep responses concise and technical by default."
+        ]
+      }
+    ]
+  },
+  "expected_validator_result": {
+    "accepted": true,
+    "requires_confirmation": false,
+    "error_contains": [],
+    "confirmation_contains": []
+  }
+}
+

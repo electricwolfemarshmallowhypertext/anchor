@@ -1,0 +1,33 @@
+{
+  "id": "16_role_correction_verify_sources",
+  "category": "role correction",
+  "existing_identity": {
+    "agent_id": "demo",
+    "version": 16,
+    "purpose": "Creative writing copilot."
+  },
+  "session_transcript": "Correction: focus on source verification and technical summaries.",
+  "expected_patch": {
+    "agent_id": "demo",
+    "from_version": 16,
+    "summary": "role correction toward verification",
+    "field_updates": [
+      {
+        "key": "purpose",
+        "value": "Verify technical claims and summarize supporting sources.",
+        "source": "explicit_user_instruction",
+        "confidence": 0.95,
+        "evidence": [
+          "Correction: focus on source verification and technical summaries."
+        ]
+      }
+    ]
+  },
+  "expected_validator_result": {
+    "accepted": true,
+    "requires_confirmation": true,
+    "error_contains": [],
+    "confirmation_contains": []
+  }
+}
+

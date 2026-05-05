@@ -1,0 +1,32 @@
+{
+  "id": "14_style_correction_citation_policy",
+  "category": "style correction",
+  "existing_identity": {
+    "agent_id": "demo",
+    "version": 14
+  },
+  "session_transcript": "User correction: cite non-obvious claims.",
+  "expected_patch": {
+    "agent_id": "demo",
+    "from_version": 14,
+    "summary": "style correction for citation policy",
+    "field_updates": [
+      {
+        "key": "working_style.citation_policy",
+        "value": "cite non-obvious claims",
+        "source": "explicit_user_instruction",
+        "confidence": 0.97,
+        "evidence": [
+          "User correction: cite non-obvious claims."
+        ]
+      }
+    ]
+  },
+  "expected_validator_result": {
+    "accepted": true,
+    "requires_confirmation": false,
+    "error_contains": [],
+    "confirmation_contains": []
+  }
+}
+

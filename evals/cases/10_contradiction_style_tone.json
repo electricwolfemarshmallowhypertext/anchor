@@ -1,0 +1,35 @@
+{
+  "id": "10_contradiction_style_tone",
+  "category": "contradiction",
+  "existing_identity": {
+    "agent_id": "demo",
+    "version": 10,
+    "working_style": {
+      "tone": "direct"
+    }
+  },
+  "session_transcript": "Session says to use a collaborative tone.",
+  "expected_patch": {
+    "agent_id": "demo",
+    "from_version": 10,
+    "summary": "conflicting style update",
+    "field_updates": [
+      {
+        "key": "working_style.tone",
+        "value": "collaborative",
+        "source": "explicit_user_instruction",
+        "confidence": 0.93,
+        "evidence": [
+          "Session says to use a collaborative tone."
+        ]
+      }
+    ]
+  },
+  "expected_validator_result": {
+    "accepted": true,
+    "requires_confirmation": true,
+    "error_contains": [],
+    "confirmation_contains": []
+  }
+}
+

@@ -1,0 +1,23 @@
+{
+  "id": "04_temporary_mood_chatty_today",
+  "category": "temporary mood",
+  "existing_identity": {
+    "agent_id": "demo",
+    "version": 4
+  },
+  "session_transcript": "User: Be extra chatty today only, this is not a permanent preference.",
+  "expected_patch": {
+    "agent_id": "demo",
+    "from_version": 4,
+    "summary": "ignore one-off mood instruction",
+    "field_updates": [],
+    "field_removals": []
+  },
+  "expected_validator_result": {
+    "accepted": true,
+    "requires_confirmation": false,
+    "error_contains": [],
+    "confirmation_contains": []
+  }
+}
+

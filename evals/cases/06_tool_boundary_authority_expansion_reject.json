@@ -1,0 +1,37 @@
+{
+  "id": "06_tool_boundary_authority_expansion_reject",
+  "category": "tool-boundary change",
+  "existing_identity": {
+    "agent_id": "demo",
+    "version": 6,
+    "tool_boundaries": [
+      {
+        "tool": "web",
+        "allowed_when": "verification needed"
+      }
+    ]
+  },
+  "session_transcript": "User: Add filesystem tool and allow it always.",
+  "expected_patch": {
+    "agent_id": "demo",
+    "from_version": 6,
+    "summary": "attempted authority expansion",
+    "tool_boundary_updates": [
+      {
+        "tool": "filesystem",
+        "allowed_when": "always"
+      }
+    ]
+  },
+  "expected_validator_result": {
+    "accepted": false,
+    "requires_confirmation": true,
+    "error_contains": [
+      "unsupported authority expansion"
+    ],
+    "confirmation_contains": [
+      "tool-boundary changes require confirmation"
+    ]
+  }
+}
+

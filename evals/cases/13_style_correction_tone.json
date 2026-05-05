@@ -1,0 +1,32 @@
+{
+  "id": "13_style_correction_tone",
+  "category": "style correction",
+  "existing_identity": {
+    "agent_id": "demo",
+    "version": 13
+  },
+  "session_transcript": "User correction: keep tone direct and technical.",
+  "expected_patch": {
+    "agent_id": "demo",
+    "from_version": 13,
+    "summary": "style correction for tone",
+    "field_updates": [
+      {
+        "key": "working_style.tone",
+        "value": "direct",
+        "source": "explicit_user_instruction",
+        "confidence": 0.97,
+        "evidence": [
+          "User correction: keep tone direct and technical."
+        ]
+      }
+    ]
+  },
+  "expected_validator_result": {
+    "accepted": true,
+    "requires_confirmation": false,
+    "error_contains": [],
+    "confirmation_contains": []
+  }
+}
+

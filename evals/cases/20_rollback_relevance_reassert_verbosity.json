@@ -1,0 +1,36 @@
+{
+  "id": "20_rollback_relevance_reassert_verbosity",
+  "category": "rollback relevance",
+  "existing_identity": {
+    "agent_id": "demo",
+    "version": 20,
+    "rollback_version": 3,
+    "working_style": {
+      "verbosity": "very verbose"
+    }
+  },
+  "session_transcript": "After rollback, restore normal verbosity: brief unless planning.",
+  "expected_patch": {
+    "agent_id": "demo",
+    "from_version": 20,
+    "summary": "reassert rollback-aligned verbosity",
+    "field_updates": [
+      {
+        "key": "working_style.verbosity",
+        "value": "brief unless planning",
+        "source": "explicit_user_instruction",
+        "confidence": 0.94,
+        "evidence": [
+          "After rollback, restore normal verbosity: brief unless planning."
+        ]
+      }
+    ]
+  },
+  "expected_validator_result": {
+    "accepted": true,
+    "requires_confirmation": true,
+    "error_contains": [],
+    "confirmation_contains": []
+  }
+}
+

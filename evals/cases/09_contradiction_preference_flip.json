@@ -1,0 +1,45 @@
+{
+  "id": "09_contradiction_preference_flip",
+  "category": "contradiction",
+  "existing_identity": {
+    "agent_id": "demo",
+    "version": 9,
+    "user_preferences": [
+      {
+        "key": "user_preferences.prefers_laconic_technical_answers",
+        "value": true,
+        "source": "explicit_user_instruction",
+        "confidence": 0.99,
+        "evidence": [
+          "User: keep answers concise."
+        ]
+      }
+    ]
+  },
+  "session_transcript": "User now says: always be verbose.",
+  "expected_patch": {
+    "agent_id": "demo",
+    "from_version": 9,
+    "summary": "conflicting preference update",
+    "field_updates": [
+      {
+        "key": "user_preferences.prefers_laconic_technical_answers",
+        "value": false,
+        "source": "explicit_user_instruction",
+        "confidence": 0.92,
+        "evidence": [
+          "User now says: always be verbose."
+        ]
+      }
+    ]
+  },
+  "expected_validator_result": {
+    "accepted": true,
+    "requires_confirmation": true,
+    "error_contains": [],
+    "confirmation_contains": [
+      "preference conflict"
+    ]
+  }
+}
+

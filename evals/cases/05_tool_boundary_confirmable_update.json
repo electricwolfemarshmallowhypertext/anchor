@@ -1,0 +1,35 @@
+{
+  "id": "05_tool_boundary_confirmable_update",
+  "category": "tool-boundary change",
+  "existing_identity": {
+    "agent_id": "demo",
+    "version": 5,
+    "tool_boundaries": [
+      {
+        "tool": "web",
+        "allowed_when": "verification needed"
+      }
+    ]
+  },
+  "session_transcript": "User: Use web only for fresh facts and verification.",
+  "expected_patch": {
+    "agent_id": "demo",
+    "from_version": 5,
+    "summary": "narrow web boundary language",
+    "tool_boundary_updates": [
+      {
+        "tool": "web",
+        "allowed_when": "fresh facts or verification needed"
+      }
+    ]
+  },
+  "expected_validator_result": {
+    "accepted": true,
+    "requires_confirmation": true,
+    "error_contains": [],
+    "confirmation_contains": [
+      "tool-boundary changes require confirmation"
+    ]
+  }
+}
+

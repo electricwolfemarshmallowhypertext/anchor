@@ -1,0 +1,27 @@
+{
+  "id": "18_model_swap_continuity_no_drift",
+  "category": "model swap continuity",
+  "existing_identity": {
+    "agent_id": "demo",
+    "version": 18,
+    "purpose": "Find and summarize technical sources.",
+    "working_style": {
+      "tone": "direct"
+    }
+  },
+  "session_transcript": "After swapping models, preserve behavior exactly and do not infer new traits.",
+  "expected_patch": {
+    "agent_id": "demo",
+    "from_version": 18,
+    "summary": "no drift after swap",
+    "field_updates": [],
+    "field_removals": []
+  },
+  "expected_validator_result": {
+    "accepted": true,
+    "requires_confirmation": false,
+    "error_contains": [],
+    "confirmation_contains": []
+  }
+}
+

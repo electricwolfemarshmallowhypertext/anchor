@@ -1,0 +1,23 @@
+{
+  "id": "03_temporary_mood_frustration",
+  "category": "temporary mood",
+  "existing_identity": {
+    "agent_id": "demo",
+    "version": 3
+  },
+  "session_transcript": "User: I am frustrated right now. Keep this only for this session.",
+  "expected_patch": {
+    "agent_id": "demo",
+    "from_version": 3,
+    "summary": "no durable identity change from temporary mood",
+    "field_updates": [],
+    "field_removals": []
+  },
+  "expected_validator_result": {
+    "accepted": true,
+    "requires_confirmation": false,
+    "error_contains": [],
+    "confirmation_contains": []
+  }
+}
+
