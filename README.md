@@ -54,6 +54,12 @@ python -m evals.run_evals
 python -m pytest -q
 ```
 
+Live benchmark (structured output via Python client, not `ollama run`):
+
+```bash
+python -m evals.run_ollama_benchmark --model tionne/anchor --case 02_explicit_preference_planning_depth
+```
+
 ## Ollama Model Usage
 
 Public Ollama model: `tionne/anchor`  
@@ -63,7 +69,6 @@ Published Ollama model usage:
 
 ```bash
 ollama pull tionne/anchor
-ollama run tionne/anchor
 ```
 
 Local development can still use the Modelfile to create the model manually:
@@ -73,7 +78,7 @@ ollama create anchor -f Modelfile
 ```
 
 Anchor expects an Ollama model that returns an `IdentityPatch` JSON object.
-Use `format=<IdentityPatch JSON schema>` with `/api/generate`. Output is parsed and validated before any write.
+Use Ollama JSON mode (`format="json"`) with `/api/generate`, then validate locally with Pydantic (`IdentityPatch`) before any write.
 
 ## Safety Model
 

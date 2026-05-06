@@ -11,11 +11,11 @@ class OllamaClient:
         self.base_url = base_url.rstrip("/")
         self.timeout = timeout
 
-    def generate_patch(self, model: str, prompt: str, schema: dict[str, Any]) -> dict[str, Any]:
+    def generate_patch(self, model: str, prompt: str, schema: dict[str, Any] | None = None) -> dict[str, Any]:
         payload = {
             "model": model,
             "prompt": prompt,
-            "format": schema,
+            "format": "json",
             "stream": False,
         }
         data = json.dumps(payload).encode("utf-8")
@@ -28,6 +28,15 @@ class OllamaClient:
         try:
             with urllib.request.urlopen(request, timeout=self.timeout) as response:
                 raw_body = response.read().decode("utf-8")
+        except urllib.error.HTTPError as exc:
+            error_body = ""
+            try:
+                error_body = exc.read().decode("utf-8", errors="replace")
+            except Exception:  # noqa: BLE001
+                error_body = "<failed to read error body>"
+            raise RuntimeError(
+                f"ollama request failed: status={exc.code} body={error_body}"
+            ) from exc
         except urllib.error.URLError as exc:
             raise RuntimeError(f"ollama request failed: {exc}") from exc
 
