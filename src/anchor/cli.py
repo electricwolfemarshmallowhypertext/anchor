@@ -29,7 +29,8 @@ def cmd_init(args: argparse.Namespace) -> int:
     init_db(db_path)
     existing = load_identity(args.agent_id, db_path)
     if existing is not None:
-        print(f"agent '{args.agent_id}' already exists at version {existing.version}")
+        print(f"Agent '{args.agent_id}' already exists (version {existing.version}).")
+        print(f"Next: anchor show {args.agent_id}")
         return 0
 
     capsule = IdentityCapsule(
@@ -46,7 +47,8 @@ def cmd_init(args: argparse.Namespace) -> int:
         ],
     )
     saved = save_identity(capsule, db_path)
-    print(f"initialized agent '{saved.agent_id}' version={saved.version}")
+    print(f"Initialized agent '{saved.agent_id}' at version {saved.version}.")
+    print(f"Next: anchor compile --agent {saved.agent_id} --session examples/session.md --out patch.json")
     return 0
 
 
@@ -58,7 +60,8 @@ def cmd_compile(args: argparse.Namespace) -> int:
     patch = compile_patch(capsule=capsule, transcript=transcript, client=client, model=args.model)
     out_path = Path(args.out)
     out_path.write_text(patch_to_json(patch), encoding="utf-8")
-    print(f"compiled patch -> {out_path}")
+    print(f"Compiled patch saved to: {out_path}")
+    print(f"Next: anchor apply --agent {args.agent} --patch {out_path}")
     return 0
 
 
@@ -73,6 +76,7 @@ def cmd_apply(args: argparse.Namespace) -> int:
         print("patch rejected:")
         for err in result.errors:
             print(f"- {err}")
+        print("No changes were written.")
         return 1
 
     if result.requires_confirmation and not args.confirm_risky:
@@ -80,18 +84,21 @@ def cmd_apply(args: argparse.Namespace) -> int:
         for reason in result.confirmation_reasons:
             print(f"- {reason}")
         print("re-run with --confirm-risky to apply")
+        print("No changes were written.")
         return 1
 
     updated = apply_patch(capsule, patch)
     saved = save_identity(updated, db_path)
     append_patch(args.agent, patch, db_path)
-    print(f"patch applied; new version={saved.version}")
+    print(f"Patch applied. Agent '{saved.agent_id}' is now at version {saved.version}.")
+    print(f"Next: anchor render {saved.agent_id}")
     return 0
 
 
 def cmd_show(args: argparse.Namespace) -> int:
     capsule = _must_load_identity(args.agent_id, _db_path(args))
     print(capsule.model_dump_json(indent=2))
+    print(f"\nTip: run `anchor render {args.agent_id}` to copy a prompt-ready identity block.")
     return 0
 
 
@@ -105,9 +112,10 @@ def cmd_rollback(args: argparse.Namespace) -> int:
     db_path = _db_path(args)
     restored = rollback(args.agent_id, args.version, db_path)
     print(
-        "rollback completed: "
+        "Rollback completed: "
         f"agent={restored.agent_id} rollback_version={restored.rollback_version} version={restored.version}"
     )
+    print(f"Next: anchor render {restored.agent_id}")
     return 0
 
 

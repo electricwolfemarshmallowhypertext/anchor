@@ -1,0 +1,22 @@
+{
+  "agent_id": "demo",
+  "from_version": 1,
+  "summary": "Capture explicit preference for stepwise plans.",
+  "field_updates": [
+    {
+      "key": "user_preferences.prefers_stepwise_plans",
+      "value": true,
+      "source": "explicit_user_instruction",
+      "confidence": 0.95,
+      "evidence": [
+        "Please use step-by-step plans when the task is complex."
+      ],
+      "requires_confirmation": false
+    }
+  ],
+  "field_removals": [],
+  "tool_boundary_updates": [],
+  "requires_confirmation": [],
+  "conflicts": [],
+  "suspicions": []
+}

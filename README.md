@@ -38,12 +38,14 @@ pip install -e .[dev]
 ## CLI Quickstart
 
 ```bash
-anchor init research-assistant
-anchor compile --agent research-assistant --session examples/session.md --out patch.json
-# apply is separate and can require --confirm-risky for gated patches
-anchor apply --agent research-assistant --patch patch.json
-anchor render research-assistant
+anchor init demo
+anchor compile --agent demo --session examples/session.md --out patch.json
+anchor apply --agent demo --patch patch.json
+anchor render demo
+anchor rollback demo --version 1
 ```
+
+`anchor render demo` prints a prompt-ready identity block you can copy into another agent's system prompt.
 
 ## Evals
 
