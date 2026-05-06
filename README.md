@@ -57,18 +57,24 @@ python -m pytest -q
 Live benchmark (structured output via Python client, not `ollama run`):
 
 ```bash
-python -m evals.run_ollama_benchmark --model tionne/anchor --case 02_explicit_preference_planning_depth
+python -m evals.run_ollama_benchmark --model yourname/anchor --case 02_explicit_preference_planning_depth
 ```
 
 ## Ollama Model Usage
 
-Public Ollama model: `tionne/anchor`  
+Public Ollama model: `yourname/anchor`  
 Local dev model: `anchor`
 
 Published Ollama model usage:
 
 ```bash
-ollama pull tionne/anchor
+ollama pull yourname/anchor
+```
+
+Private/local publish command:
+
+```bash
+ollama push tionne/anchor
 ```
 
 Local development can still use the Modelfile to create the model manually:
