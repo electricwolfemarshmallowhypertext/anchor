@@ -13,6 +13,10 @@ SECRET_PATTERNS = [
     re.compile(r"\b[A-Z0-9_]*(KEY|TOKEN|SECRET|PASSWORD)[A-Z0-9_]*\s*=\s*\S+", re.IGNORECASE),
     re.compile(r"\bpassword\s*(?:is|:|=)\s*\S+", re.IGNORECASE),
     re.compile(r"(api[_-]?key|secret|token|password)\s*[:=]\s*\S+", re.IGNORECASE),
+    re.compile(r"\b(?:db[_-]?password|password)\s*[:=]\s*['\"]?[^'\"\s;]+['\"]?", re.IGNORECASE),
+    re.compile(r"\bmy password is\s+['\"]?[^'\"\s;]+['\"]?", re.IGNORECASE),
+    re.compile(r"\b[a-zA-Z0-9._%+-]{2,}:[^\s/@]{2,}\b"),
+    re.compile(r"['\"](?:db[_-]?password|password)['\"]\s*[:=]\s*['\"][^'\"]+['\"]", re.IGNORECASE),
     re.compile(r"-----BEGIN (?:RSA|OPENSSH|EC) PRIVATE KEY-----"),
 ]
 
@@ -27,6 +31,12 @@ INJECTION_PATTERNS = [
     re.compile(r"overwrite user preferences", re.IGNORECASE),
     re.compile(r"disable.*guardrail", re.IGNORECASE),
     re.compile(r"bypass.*policy", re.IGNORECASE),
+    re.compile(r"disable\s+safety", re.IGNORECASE),
+    re.compile(r"ignore\s+safety", re.IGNORECASE),
+    re.compile(r"remove\s+restrictions?", re.IGNORECASE),
+    re.compile(r"turn\s+off\s+validation", re.IGNORECASE),
+    re.compile(r"override\s+validator", re.IGNORECASE),
+    re.compile(r"ignore\s+identity\s+protection", re.IGNORECASE),
 ]
 
 ALLOWED_SOURCES = {
@@ -121,6 +131,18 @@ def prompt_injection_check(text: str) -> bool:
     return any(pattern.search(text) for pattern in INJECTION_PATTERNS)
 
 
+def password_context_secret_check(value_text: str, evidence_text: str, key: str) -> bool:
+    context = f"{key} {evidence_text}".lower()
+    if not any(token in context for token in ("password", "db_password", "db-password", "user:pass")):
+        return False
+
+    candidate = value_text.strip()
+    if not candidate:
+        return False
+    candidate = candidate.strip("'\"")
+    return bool(re.fullmatch(r"[^\s]{6,}", candidate))
+
+
 def validate_patch(capsule: IdentityCapsule, patch: IdentityPatch) -> ValidationResult:
     errors: list[str] = []
     confirmation_reasons: list[str] = list(patch.requires_confirmation)
@@ -142,6 +164,8 @@ def validate_patch(capsule: IdentityCapsule, patch: IdentityPatch) -> Validation
             errors.append(f"source_evidence_check failed for '{field.key}'")
 
         evidence_text = " ".join(field.evidence)
+        if password_context_secret_check(value_text, evidence_text, field.key):
+            errors.append(f"secret_regex_check failed for '{field.key}'")
         if prompt_injection_check(value_text) or prompt_injection_check(evidence_text):
             errors.append(f"prompt_injection_check failed for '{field.key}'")
             suspicions.append(
@@ -167,6 +191,17 @@ def validate_patch(capsule: IdentityCapsule, patch: IdentityPatch) -> Validation
                 confirmation_reasons.append(f"preference conflict on '{field.key}'")
         if field.requires_confirmation:
             confirmation_reasons.append(f"field '{field.key}' requires confirmation")
+
+    summary_text = patch.summary or ""
+    if prompt_injection_check(summary_text):
+        errors.append("prompt_injection_check failed for patch summary")
+        suspicions.append(
+            Suspicion(
+                kind="prompt_injection",
+                detail="patch summary appears to be derived from prompt-injection text",
+                evidence=summary_text,
+            )
+        )
 
     if patch.tool_boundary_updates:
         confirmation_reasons.append("tool-boundary changes require confirmation")
