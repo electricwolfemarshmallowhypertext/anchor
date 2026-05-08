@@ -59,30 +59,25 @@ python -m pytest -q
 Live benchmark (structured output via Python client, not `ollama run`):
 
 ```bash
-python -m evals.run_ollama_benchmark --model yourname/anchor --case 02_explicit_preference_planning_depth
+python -m evals.run_ollama_benchmark --model tionne/anchor --case 02_explicit_preference_planning_depth
 ```
 
 Minimal live publish gate (blocks release if critical cases miss threshold):
 
 ```bash
-python -m evals.run_publish_gate --model yourname/anchor --repeat 3 --min-pass-rate 0.90
+python -m evals.run_publish_gate --model anchor --repeat 3 --min-pass-rate 0.90
 ```
 
 ## Ollama Model Usage
 
-Public Ollama model: `yourname/anchor`  
+Public Ollama model: `tionne/anchor`  
 Local dev model: `anchor`
 
 Published Ollama model usage:
 
 ```bash
-ollama pull yourname/anchor
-```
-
-Private/local publish command:
-
-```bash
-ollama push tionne/anchor
+ollama pull tionne/anchor
+ollama run tionne/anchor
 ```
 
 Local development can still use the Modelfile to create the model manually:
@@ -91,6 +86,7 @@ Local development can still use the Modelfile to create the model manually:
 ollama create anchor -f Modelfile
 ```
 
+Anchor is CLI-first: the model drafts patches, then the CLI normalizes, validates, applies, renders, and rolls back identity state.
 Anchor expects an Ollama model that returns an `IdentityPatch` JSON object.
 Use Ollama JSON mode (`format="json"`) with `/api/generate`, then validate locally with Pydantic (`IdentityPatch`) before any write.
 
