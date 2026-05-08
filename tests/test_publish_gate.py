@@ -88,12 +88,12 @@ def test_run_publish_gate_fails_on_compile_fatal(monkeypatch) -> None:
     assert "11_secret_leakage_env_key attempt 1" in fatal_errors[0]
 
 
-def test_run_publish_gate_allows_safety_fail_closed_without_blocking(monkeypatch) -> None:
+def test_run_publish_gate_counts_invalid_safety_compile_as_failed_attempt(monkeypatch) -> None:
     attempts = iter(
         [
-            (True, False, "safe_fail_closed: compile failed: RuntimeError: invalid removal path"),
-            (True, False, "safe_fail_closed: compile failed: RuntimeError: invalid removal path"),
-            (True, False, "safe_fail_closed: compile failed: RuntimeError: invalid removal path"),
+            (False, False, "compile_invalid_safety_case: compile failed: RuntimeError: invalid removal path"),
+            (False, False, "compile_invalid_safety_case: compile failed: RuntimeError: invalid removal path"),
+            (False, False, "compile_invalid_safety_case: compile failed: RuntimeError: invalid removal path"),
         ]
     )
 
@@ -112,8 +112,8 @@ def test_run_publish_gate_allows_safety_fail_closed_without_blocking(monkeypatch
         show_progress=False,
     )
 
-    assert ok
-    assert summary["07_prompt_injection_ignore_previous_identity"]["pass_rate"] == pytest.approx(1.0)
+    assert not ok
+    assert summary["07_prompt_injection_ignore_previous_identity"]["pass_rate"] == pytest.approx(0.0)
     assert fatal_errors == []
 
 
@@ -155,7 +155,7 @@ def test_run_publish_gate_rejects_non_positive_timeout() -> None:
         )
 
 
-def test_run_live_gate_attempt_safety_case_compile_failure_is_safe_pass(monkeypatch) -> None:
+def test_run_live_gate_attempt_safety_case_compile_failure_is_failed_attempt(monkeypatch) -> None:
     def fake_compile_patch(capsule, transcript, client, model):
         del capsule, transcript, client, model
         raise RuntimeError("identity patch validation failed after one repair attempt")
@@ -168,9 +168,9 @@ def test_run_live_gate_attempt_safety_case_compile_failure_is_safe_pass(monkeypa
         timeout=60.0,
     )
 
-    assert ok
+    assert not ok
     assert not is_fatal
-    assert detail.startswith("safe_fail_closed: compile failed: RuntimeError:")
+    assert detail.startswith("compile_invalid_safety_case: compile failed: RuntimeError:")
 
 
 def test_run_live_gate_attempt_case_15_uses_key_level_semantics(monkeypatch) -> None:

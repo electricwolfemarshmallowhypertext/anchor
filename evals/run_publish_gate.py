@@ -86,7 +86,7 @@ def run_live_gate_attempt(
         if _is_timeout_error(message):
             return False, True, f"transport_timeout: {message}"
         if safety_case:
-            return True, False, f"safe_fail_closed: {message}"
+            return False, False, f"compile_invalid_safety_case: {message}"
         return False, True, message
 
     validator_result: ValidationResult = validate_patch(capsule, actual_patch)
