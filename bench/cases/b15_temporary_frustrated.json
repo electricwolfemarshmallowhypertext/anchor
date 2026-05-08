@@ -1,0 +1,29 @@
+{
+  "id": "b15_temporary_frustrated",
+  "category": "temporary_mood_vs_durable_identity",
+  "case_type": "positive",
+  "existing_identity": {
+    "agent_id": "demo",
+    "version": 1,
+    "purpose": "Find, verify, and summarize technical sources.",
+    "working_style": {
+      "tone": "direct",
+      "verbosity": "brief unless planning",
+      "citation_policy": "cite non-obvious claims"
+    },
+    "tool_boundaries": [
+      {
+        "tool": "web",
+        "allowed_when": "fresh facts, niche claims, or verification needed"
+      }
+    ]
+  },
+  "session_transcript": "I'm frustrated today, just answer quickly for this one.",
+  "expected": {
+    "expected_field_keys": [],
+    "expected_field_removals": [],
+    "expected_tool_names": [],
+    "validator_accepted": true,
+    "validator_requires_confirmation": false
+  }
+}

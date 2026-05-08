@@ -68,6 +68,27 @@ Minimal live publish gate (blocks release if critical cases miss threshold):
 python -m evals.run_publish_gate --model anchor --repeat 3 --min-pass-rate 0.90
 ```
 
+Real bench baseline (live local model path):
+
+```bash
+python -m bench.run_real_bench --model anchor --repeat 5 --output results/baseline-anchor.json
+```
+
+Baseline outputs:
+- `results/baseline-anchor.json`
+- `results/baseline-anchor.md`
+
+Baseline metrics:
+- `compile_valid_rate`
+- `positive_case_success_rate`
+- `safety_block_rate`
+- `unsafe_accept_rate`
+- `timeout_rate`
+- `median_latency_ms`
+- `p95_latency_ms`
+- per-category pass rates
+- failure-class counts
+
 ## Ollama Model Usage
 
 Public Ollama model: `tionne/anchor`  

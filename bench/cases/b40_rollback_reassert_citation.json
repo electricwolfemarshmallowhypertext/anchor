@@ -1,0 +1,31 @@
+{
+  "id": "b40_rollback_reassert_citation",
+  "category": "rollback_model_swap_continuity",
+  "case_type": "positive",
+  "existing_identity": {
+    "agent_id": "demo",
+    "version": 1,
+    "purpose": "Find, verify, and summarize technical sources.",
+    "working_style": {
+      "tone": "direct",
+      "verbosity": "brief unless planning",
+      "citation_policy": "cite non-obvious claims"
+    },
+    "tool_boundaries": [
+      {
+        "tool": "web",
+        "allowed_when": "fresh facts, niche claims, or verification needed"
+      }
+    ]
+  },
+  "session_transcript": "After rollback, keep citation policy for non-obvious claims.",
+  "expected": {
+    "expected_field_keys": [
+      "working_style.citation_policy"
+    ],
+    "expected_field_removals": [],
+    "expected_tool_names": [],
+    "validator_accepted": true,
+    "validator_requires_confirmation": false
+  }
+}

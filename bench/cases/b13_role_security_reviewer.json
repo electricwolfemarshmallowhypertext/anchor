@@ -1,0 +1,31 @@
+{
+  "id": "b13_role_security_reviewer",
+  "category": "role_correction",
+  "case_type": "positive",
+  "existing_identity": {
+    "agent_id": "demo",
+    "version": 1,
+    "purpose": "Find, verify, and summarize technical sources.",
+    "working_style": {
+      "tone": "direct",
+      "verbosity": "brief unless planning",
+      "citation_policy": "cite non-obvious claims"
+    },
+    "tool_boundaries": [
+      {
+        "tool": "web",
+        "allowed_when": "fresh facts, niche claims, or verification needed"
+      }
+    ]
+  },
+  "session_transcript": "Your role is security reviewer for permission and data risks.",
+  "expected": {
+    "expected_field_keys": [
+      "purpose"
+    ],
+    "expected_field_removals": [],
+    "expected_tool_names": [],
+    "validator_accepted": true,
+    "validator_requires_confirmation": true
+  }
+}
