@@ -72,3 +72,30 @@ def test_run_benchmark_reports_compile_failure_instead_of_traceback(monkeypatch)
     )
     assert not ok
     assert any("compile failed: ValueError: missing required patch fields" in err for err in errors)
+
+
+def test_run_benchmark_passes_timeout_to_ollama_client(monkeypatch) -> None:
+    captured: dict[str, object] = {}
+
+    class FakeClient:
+        def __init__(self, base_url: str, timeout: float):
+            captured["base_url"] = base_url
+            captured["timeout"] = timeout
+
+    def fake_compile_patch(capsule, transcript, client, model):
+        del transcript, model
+        assert isinstance(client, FakeClient)
+        return IdentityPatch(agent_id=capsule.agent_id, from_version=capsule.version)
+
+    monkeypatch.setattr(run_ollama_benchmark, "OllamaClient", FakeClient)
+    monkeypatch.setattr(run_ollama_benchmark, "compile_patch", fake_compile_patch)
+    ok, errors = run_ollama_benchmark.run_benchmark(
+        case_id="17_model_swap_continuity_no_change",
+        model="anchor",
+        base_url="http://localhost:11434",
+        timeout=42.5,
+    )
+
+    assert ok
+    assert errors == []
+    assert captured == {"base_url": "http://localhost:11434", "timeout": 42.5}

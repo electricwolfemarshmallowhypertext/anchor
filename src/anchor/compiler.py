@@ -7,6 +7,33 @@ from pydantic import ValidationError
 
 from .models import IdentityCapsule, IdentityField, IdentityPatch
 
+ALLOWED_PATCH_TOP_LEVEL_KEYS = {
+    "agent_id",
+    "from_version",
+    "summary",
+    "field_updates",
+    "field_removals",
+    "tool_boundary_updates",
+    "requires_confirmation",
+    "conflicts",
+    "suspicions",
+    "created_at",
+}
+
+STRIPPABLE_IDENTITY_METADATA_KEYS = {
+    "version",
+    "created_at",
+    "updated_at",
+    "rollback_version",
+    "corrections",
+    "drift_history",
+    "open_conflicts",
+}
+
+SOURCE_ALIASES = {
+    "user": "explicit_user_instruction",
+}
+
 
 def build_compile_prompt(capsule: IdentityCapsule, transcript: str) -> str:
     capsule_json = capsule.model_dump_json(indent=2)
@@ -80,6 +107,121 @@ def build_compile_prompt(capsule: IdentityCapsule, transcript: str) -> str:
         '- Do not use nested value objects like {"planning":"...","execution":"..."}.\n'
         "  Preserve the same meaning in one string value.\n"
     )
+
+
+def _normalize_verbosity_value(value: object) -> object:
+    if not isinstance(value, dict):
+        return value
+    planning = value.get("planning")
+    execution = value.get("execution")
+    if not isinstance(planning, str) or not isinstance(execution, str):
+        return value
+
+    planning_lower = planning.lower()
+    execution_lower = execution.lower()
+
+    planning_term = "detailed" if "deep" in planning_lower or "detail" in planning_lower else planning.strip()
+    execution_term = (
+        "concise"
+        if "brief" in execution_lower or "concise" in execution_lower or "short" in execution_lower
+        else execution.strip()
+    )
+    return f"{planning_term} during planning, {execution_term} during execution"
+
+
+def _normalize_field_key(value: object) -> object:
+    if not isinstance(value, str):
+        return value
+    key = value.strip()
+    if key == "working_style":
+        return "working_style.verbosity"
+    if key in {"user_preferences", "decisions", "corrections"}:
+        return f"{key}.notes"
+    return key
+
+
+def _normalize_field_update(value: object) -> object:
+    if not isinstance(value, dict):
+        return value
+    normalized = dict(value)
+    if "key" not in normalized and "field" in normalized:
+        normalized["key"] = normalized["field"]
+    normalized.pop("field", None)
+
+    normalized["key"] = _normalize_field_key(normalized.get("key"))
+
+    source = normalized.get("source")
+    if isinstance(source, str):
+        mapped_source = SOURCE_ALIASES.get(source.strip().lower())
+        if mapped_source is not None:
+            normalized["source"] = mapped_source
+
+    evidence = normalized.get("evidence")
+    if isinstance(evidence, str):
+        normalized["evidence"] = [evidence]
+
+    if normalized.get("key") == "working_style.verbosity":
+        normalized["value"] = _normalize_verbosity_value(normalized.get("value"))
+
+    return normalized
+
+
+def _normalize_field_removal(value: object) -> object:
+    if isinstance(value, dict):
+        if "key" not in value:
+            raise RuntimeError("field_removals item object must include 'key'")
+        return _normalize_field_key(value.get("key"))
+    return _normalize_field_key(value)
+
+
+def _normalize_tool_boundary_update(value: object) -> object:
+    if not isinstance(value, dict):
+        raise RuntimeError("tool_boundary_updates item must be an object")
+
+    keys = set(value.keys())
+    if keys == {"tool", "allowed_when"}:
+        return value
+
+    field_like_keys = {"key", "value", "source", "evidence"}
+    if keys.intersection(field_like_keys):
+        if value.get("key") != "tool":
+            raise RuntimeError("tool_boundary_updates field-like item must use key='tool'")
+        tool_value = value.get("value")
+        allowed_when = value.get("allowed_when")
+        if not isinstance(tool_value, str) or not tool_value.strip():
+            raise RuntimeError("tool_boundary_updates field-like item must include non-empty tool value")
+        if not isinstance(allowed_when, str) or not allowed_when.strip():
+            raise RuntimeError("tool_boundary_updates field-like item must include allowed_when")
+        return {"tool": tool_value, "allowed_when": allowed_when}
+
+    raise RuntimeError("tool_boundary_updates item has unsupported shape")
+
+
+def normalize_patch(raw_patch: dict[str, object]) -> dict[str, object]:
+    normalized = dict(raw_patch)
+    for key in STRIPPABLE_IDENTITY_METADATA_KEYS:
+        normalized.pop(key, None)
+
+    unknown_keys = set(normalized.keys()).difference(ALLOWED_PATCH_TOP_LEVEL_KEYS)
+    if unknown_keys:
+        unknown = ", ".join(sorted(unknown_keys))
+        raise RuntimeError(f"identity patch contains unsupported top-level keys: {unknown}")
+
+    field_updates = normalized.get("field_updates")
+    if isinstance(field_updates, list):
+        normalized["field_updates"] = [_normalize_field_update(item) for item in field_updates]
+
+    field_removals = normalized.get("field_removals")
+    if isinstance(field_removals, list):
+        normalized["field_removals"] = [_normalize_field_removal(item) for item in field_removals]
+
+    tool_boundary_updates = normalized.get("tool_boundary_updates")
+    if isinstance(tool_boundary_updates, list):
+        normalized["tool_boundary_updates"] = [
+            _normalize_tool_boundary_update(item) for item in tool_boundary_updates
+        ]
+
+    return normalized
 
 
 def build_repair_prompt(
@@ -165,8 +307,8 @@ def compile_patch(
     schema = IdentityPatch.model_json_schema()
     patch_dict = client.generate_patch(model=model, prompt=prompt, schema=schema)
     try:
-        patch = IdentityPatch.model_validate(patch_dict)
-    except ValidationError as first_error:
+        patch = IdentityPatch.model_validate(normalize_patch(patch_dict))
+    except (ValidationError, RuntimeError, TypeError) as first_error:
         repair_prompt = build_repair_prompt(
             capsule=capsule,
             transcript=transcript,
@@ -175,8 +317,8 @@ def compile_patch(
         )
         repaired_dict = client.generate_patch(model=model, prompt=repair_prompt, schema=schema)
         try:
-            patch = IdentityPatch.model_validate(repaired_dict)
-        except ValidationError as second_error:
+            patch = IdentityPatch.model_validate(normalize_patch(repaired_dict))
+        except (ValidationError, RuntimeError, TypeError) as second_error:
             invalid_payload_json = json.dumps(repaired_dict, ensure_ascii=False)
             raise RuntimeError(
                 "identity patch validation failed after one repair attempt; "

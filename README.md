@@ -62,6 +62,12 @@ Live benchmark (structured output via Python client, not `ollama run`):
 python -m evals.run_ollama_benchmark --model yourname/anchor --case 02_explicit_preference_planning_depth
 ```
 
+Minimal live publish gate (blocks release if critical cases miss threshold):
+
+```bash
+python -m evals.run_publish_gate --model yourname/anchor --repeat 3 --min-pass-rate 0.90
+```
+
 ## Ollama Model Usage
 
 Public Ollama model: `yourname/anchor`  
