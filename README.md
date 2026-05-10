@@ -101,6 +101,8 @@ ollama pull tionne/anchor
 ollama run tionne/anchor
 ```
 
+Raw `ollama run` is a demo path; Anchor is intended for the CLI/API validation flow.
+
 Local development can still use the Modelfile to create the model manually:
 
 ```bash
