@@ -5,21 +5,24 @@ import json
 import sys
 from pathlib import Path
 
-from .compiler import apply_patch, compile_patch, patch_to_json
+from .compiler import compile_patch, patch_to_json
 from .models import IdentityCapsule, IdentityPatch
 from .ollama_client import OllamaClient
 from .policy import evaluate_policy
 from .renderer import render_identity_block
 from .store import (
     DEFAULT_DB_PATH,
-    append_patch,
+    apply_and_record,
+    create_checkpoint,
     export_json,
     import_json,
     init_db,
+    load_history,
     load_identity,
     load_identity_integrity,
     rollback,
     save_identity,
+    verify_checkpoint,
 )
 from .validator import validate_patch
 
@@ -81,15 +84,6 @@ def cmd_apply(args: argparse.Namespace) -> int:
     capsule = _must_load_identity(args.agent, db_path)
     patch_payload = json.loads(Path(args.patch).read_text(encoding="utf-8"))
     patch = IdentityPatch.model_validate(patch_payload)
-    if patch.from_version != capsule.version:
-        print(
-            "apply failed: version mismatch\n"
-            f"- patch from_version={patch.from_version}\n"
-            f"- current version={capsule.version}"
-        )
-        print("No changes were written.")
-        return 1
-
     result = validate_patch(capsule, patch)
     if not result.accepted:
         print("apply failed: validator rejection")
@@ -106,7 +100,7 @@ def cmd_apply(args: argparse.Namespace) -> int:
         print("No changes were written.")
         return 1
 
-    policy = evaluate_policy(patch)
+    policy = evaluate_policy(patch, override_mode=args.policy_override_mode)
     if policy.rejected:
         print("apply failed: policy rejection")
         for reason in policy.reasons:
@@ -121,16 +115,22 @@ def cmd_apply(args: argparse.Namespace) -> int:
         print("No changes were written.")
         return 1
 
-    updated = apply_patch(capsule, patch)
-    saved = save_identity(updated, db_path)
-    append_patch(
-        args.agent,
-        patch,
-        db_path,
-        requested_by=args.requested_by,
-        approved_by=args.approved_by,
-        applied_by=args.applied_by,
-    )
+    try:
+        saved = apply_and_record(
+            patch,
+            db_path,
+            requested_by=args.requested_by,
+            approved_by=args.approved_by,
+            applied_by=args.applied_by,
+        )
+    except ValueError as exc:
+        message = str(exc)
+        if message.startswith("version mismatch:"):
+            print("apply failed: version mismatch")
+            print(f"- {message}")
+            print("No changes were written.")
+            return 1
+        raise
     print(f"Patch applied. Agent '{saved.agent_id}' is now at version {saved.version}.")
     print(f"Next: anchor render {saved.agent_id}")
     return 0
@@ -171,9 +171,38 @@ def cmd_export(args: argparse.Namespace) -> int:
 
 
 def cmd_import(args: argparse.Namespace) -> int:
-    imported = import_json(args.input, _db_path(args), force=args.force)
+    if args.force_lineage:
+        print("warning: bypassing import lineage checks (--force-lineage)")
+    if args.force_hash:
+        print("warning: bypassing import hash checks (--force-hash)")
+    imported = import_json(
+        args.input,
+        _db_path(args),
+        force_lineage=args.force_lineage,
+        force_hash=args.force_hash,
+    )
     print(f"imported agent '{imported.agent_id}' at local version {imported.version}")
     return 0
+
+
+def cmd_history(args: argparse.Namespace) -> int:
+    history = load_history(args.agent_id, _db_path(args))
+    if not history:
+        raise ValueError(f"agent '{args.agent_id}' not found")
+    print(json.dumps(history, indent=2))
+    return 0
+
+
+def cmd_checkpoint_create(args: argparse.Namespace) -> int:
+    out = create_checkpoint(args.agent_id, _db_path(args))
+    print(f"checkpoint created -> {out}")
+    return 0
+
+
+def cmd_checkpoint_verify(args: argparse.Namespace) -> int:
+    result = verify_checkpoint(args.agent_id, _db_path(args))
+    print(json.dumps(result, indent=2))
+    return 0 if result.get("ok") else 1
 
 
 def build_parser() -> argparse.ArgumentParser:
@@ -203,6 +232,7 @@ def build_parser() -> argparse.ArgumentParser:
     apply_parser.add_argument("--requested-by")
     apply_parser.add_argument("--approved-by")
     apply_parser.add_argument("--applied-by")
+    apply_parser.add_argument("--policy-override-mode", action="store_true")
     apply_parser.set_defaults(func=cmd_apply)
 
     show_parser = subparsers.add_parser("show")
@@ -225,8 +255,24 @@ def build_parser() -> argparse.ArgumentParser:
 
     import_parser = subparsers.add_parser("import")
     import_parser.add_argument("--in", dest="input", required=True)
-    import_parser.add_argument("--force", action="store_true")
+    import_parser.add_argument("--force-lineage", action="store_true")
+    import_parser.add_argument("--force-hash", action="store_true")
     import_parser.set_defaults(func=cmd_import)
+
+    history_parser = subparsers.add_parser("history")
+    history_parser.add_argument("agent_id")
+    history_parser.set_defaults(func=cmd_history)
+
+    checkpoint_parser = subparsers.add_parser("checkpoint")
+    checkpoint_subparsers = checkpoint_parser.add_subparsers(dest="checkpoint_command", required=True)
+
+    checkpoint_create_parser = checkpoint_subparsers.add_parser("create")
+    checkpoint_create_parser.add_argument("agent_id")
+    checkpoint_create_parser.set_defaults(func=cmd_checkpoint_create)
+
+    checkpoint_verify_parser = checkpoint_subparsers.add_parser("verify")
+    checkpoint_verify_parser.add_argument("agent_id")
+    checkpoint_verify_parser.set_defaults(func=cmd_checkpoint_verify)
 
     return parser
 

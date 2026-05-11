@@ -106,21 +106,43 @@ GitHub:
 https://github.com/electricwolfemarshmallowhypertext/anchor
 ```
 
+The Ollama model drafts patches; the CLI is the trusted write path.
 The model returns IdentityPatch JSON drafts. The CLI normalizes, validates, applies, renders, and rolls them back.
+
+CLI examples:
+
+```bash
+anchor history demo
+anchor export demo --out identity.anchor.json
+anchor import --in identity.anchor.json
+anchor import --in identity.anchor.json --force-lineage
+anchor import --in identity.anchor.json --force-hash
+```
 
 ## Safety Model
 
 - Compile and apply are separate commands; patches are not auto-applied
-- Deterministic validator checks run before apply
-- Rejects secret-like values and known prompt-injection patterns
-- Rejects unsupported authority expansion in tool boundaries
-- Requires explicit confirmation for risky changes
-- Versioned storage keeps audit trail and rollback path
+- Apply uses one atomic SQLite transaction for identity write + patch record + event record
+- Version checks happen transactionally inside the write path
+- Policy gate runs before writes
+- Structural policy checks run before regex policy checks
+- Integrity hash chain (`capsule_hash`, `previous_hash`) is stored per version
+- Actor metadata (`requested_by`, `approved_by`, `applied_by`) is recorded on apply events
+- Export/import uses an integrity envelope (`agent_id`, `version`, `capsule_hash`, `previous_hash`, `capsule`)
+- Import bypasses are scoped (`--force-lineage`, `--force-hash`) with explicit warnings
+- `anchor history` provides inspectable version/audit history without SQL access
+
+## V1 hardening
+
+- apply is atomic
+- unsafe policy paths fail closed
+- history is inspectable without SQL
+- import bypasses are explicit and scoped
 
 ## Current Limitations
 
-- local identity capsule only
-- patch quality depends on compiler/model output
-- validator is deterministic but not complete security
-- no hosted sync
-- no multi-agent governance yet
+- local-first only; no hosted sync
+- no multi-agent roles or delegation tokens
+- model patch quality still varies, but compile output is normalized and validated before apply
+- validator/policy are deterministic guardrails, not a complete security boundary
+- integrity chain is tamper-evident inside local storage, not cryptographically signed externally

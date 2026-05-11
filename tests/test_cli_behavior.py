@@ -276,4 +276,113 @@ def test_import_command_requires_force_for_lineage_mismatch(tmp_path: Path) -> N
     out.write_text(json.dumps(payload, indent=2), encoding="utf-8")
 
     assert main(["--db", str(db_path), "import", "--in", str(out)]) == 1
-    assert main(["--db", str(db_path), "import", "--in", str(out), "--force"]) == 0
+    assert main(["--db", str(db_path), "import", "--in", str(out), "--force-lineage"]) == 0
+
+
+def test_import_force_flags_print_scoped_warnings(tmp_path: Path, capsys) -> None:
+    db_path = tmp_path / "anchor.db"
+    out = tmp_path / "identity.export.json"
+    assert main(["--db", str(db_path), "init", "demo"]) == 0
+    assert main(["--db", str(db_path), "export", "demo", "--out", str(out)]) == 0
+    payload = json.loads(out.read_text(encoding="utf-8"))
+    payload["version"] = 5
+    payload["capsule_hash"] = "invalid"
+    out.write_text(json.dumps(payload, indent=2), encoding="utf-8")
+
+    assert (
+        main(
+            [
+                "--db",
+                str(db_path),
+                "import",
+                "--in",
+                str(out),
+                "--force-lineage",
+                "--force-hash",
+            ]
+        )
+        == 0
+    )
+    output = capsys.readouterr().out
+    assert "warning: bypassing import lineage checks (--force-lineage)" in output
+    assert "warning: bypassing import hash checks (--force-hash)" in output
+
+
+def test_history_command_outputs_required_fields(tmp_path: Path, capsys) -> None:
+    db_path = tmp_path / "anchor.db"
+    patch_path = tmp_path / "patch.json"
+    assert main(["--db", str(db_path), "init", "demo"]) == 0
+    patch = IdentityPatch(
+        agent_id="demo",
+        from_version=1,
+        field_updates=[],
+    )
+    patch_path.write_text(patch.model_dump_json(indent=2), encoding="utf-8")
+    assert (
+        main(
+            [
+                "--db",
+                str(db_path),
+                "apply",
+                "--agent",
+                "demo",
+                "--patch",
+                str(patch_path),
+                "--requested-by",
+                "alice",
+                "--approved-by",
+                "bob",
+                "--applied-by",
+                "charlie",
+            ]
+        )
+        == 0
+    )
+    _ = capsys.readouterr()
+    assert main(["--db", str(db_path), "history", "demo"]) == 0
+    payload = json.loads(capsys.readouterr().out)
+    latest = payload[-1]
+    assert {
+        "version",
+        "hash",
+        "previous_hash",
+        "summary",
+        "requested_by",
+        "approved_by",
+        "applied_by",
+        "timestamp",
+    }.issubset(latest.keys())
+    assert latest["requested_by"] == "alice"
+    assert latest["approved_by"] == "bob"
+    assert latest["applied_by"] == "charlie"
+
+
+def test_checkpoint_create_and_verify_commands(tmp_path: Path, capsys) -> None:
+    db_path = tmp_path / "anchor.db"
+    assert main(["--db", str(db_path), "init", "demo"]) == 0
+    _ = capsys.readouterr()
+    assert main(["--db", str(db_path), "checkpoint", "create", "demo"]) == 0
+    create_out = capsys.readouterr().out
+    assert "checkpoint created ->" in create_out
+    assert main(["--db", str(db_path), "checkpoint", "verify", "demo"]) == 0
+    verify_payload = json.loads(capsys.readouterr().out)
+    assert verify_payload["ok"] is True
+
+
+def test_checkpoint_verify_detects_rotated_version(tmp_path: Path, capsys) -> None:
+    db_path = tmp_path / "anchor.db"
+    patch_path = tmp_path / "patch.json"
+    assert main(["--db", str(db_path), "init", "demo"]) == 0
+    _ = capsys.readouterr()
+    assert main(["--db", str(db_path), "checkpoint", "create", "demo"]) == 0
+    _ = capsys.readouterr()
+
+    patch = IdentityPatch(agent_id="demo", from_version=1, field_updates=[])
+    patch_path.write_text(patch.model_dump_json(indent=2), encoding="utf-8")
+    assert main(["--db", str(db_path), "apply", "--agent", "demo", "--patch", str(patch_path)]) == 0
+    _ = capsys.readouterr()
+
+    assert main(["--db", str(db_path), "checkpoint", "verify", "demo"]) == 1
+    verify_payload = json.loads(capsys.readouterr().out)
+    assert verify_payload["ok"] is False
+    assert "version mismatch" in verify_payload["reason"]

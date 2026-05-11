@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import base64
 import hashlib
 import json
 import sqlite3
@@ -7,13 +8,44 @@ from datetime import datetime, timezone
 from pathlib import Path
 from typing import Any
 
+from cryptography.hazmat.primitives import serialization
+from cryptography.hazmat.primitives.asymmetric.ed25519 import Ed25519PrivateKey, Ed25519PublicKey
+from cryptography.exceptions import InvalidSignature
+
 from .models import IdentityCapsule, IdentityPatch
 
 DEFAULT_DB_PATH = Path(".anchor") / "anchor.db"
+CHECKPOINT_DIR_NAME = "checkpoints"
+CHECKPOINT_PRIVATE_KEY_NAME = "checkpoint_ed25519_private.pem"
+CHECKPOINT_PUBLIC_KEY_NAME = "checkpoint_ed25519_public.pem"
 
 
 def utc_now_iso() -> str:
     return datetime.now(timezone.utc).isoformat()
+
+
+def _db_root(path: str | Path) -> Path:
+    return Path(path).parent
+
+
+def _checkpoint_dir(path: str | Path) -> Path:
+    return _db_root(path) / CHECKPOINT_DIR_NAME
+
+
+def _checkpoint_path(agent_id: str, path: str | Path) -> Path:
+    return _checkpoint_dir(path) / f"{agent_id}.checkpoint.json"
+
+
+def _private_key_path(path: str | Path) -> Path:
+    return _db_root(path) / CHECKPOINT_PRIVATE_KEY_NAME
+
+
+def _public_key_path(path: str | Path) -> Path:
+    return _db_root(path) / CHECKPOINT_PUBLIC_KEY_NAME
+
+
+def _canonical_json_bytes(payload: dict[str, Any]) -> bytes:
+    return json.dumps(payload, sort_keys=True, separators=(",", ":"), ensure_ascii=False).encode("utf-8")
 
 
 def _ensure_column(conn: sqlite3.Connection, table: str, column: str, definition: str) -> None:
@@ -109,6 +141,39 @@ def _canonical_capsule_payload(capsule: IdentityCapsule) -> str:
 def compute_capsule_hash(capsule: IdentityCapsule) -> str:
     canonical = _canonical_capsule_payload(capsule)
     return hashlib.sha256(canonical.encode("utf-8")).hexdigest()
+
+
+def _load_private_key(path: str | Path) -> Ed25519PrivateKey:
+    key_bytes = _private_key_path(path).read_bytes()
+    return serialization.load_pem_private_key(key_bytes, password=None)
+
+
+def _load_public_key(path: str | Path) -> Ed25519PublicKey:
+    key_bytes = _public_key_path(path).read_bytes()
+    return serialization.load_pem_public_key(key_bytes)
+
+
+def ensure_checkpoint_keypair(path: str | Path = DEFAULT_DB_PATH) -> tuple[Path, Path]:
+    private_path = _private_key_path(path)
+    public_path = _public_key_path(path)
+    private_path.parent.mkdir(parents=True, exist_ok=True)
+    if private_path.exists() and public_path.exists():
+        return private_path, public_path
+
+    private_key = Ed25519PrivateKey.generate()
+    public_key = private_key.public_key()
+    private_bytes = private_key.private_bytes(
+        encoding=serialization.Encoding.PEM,
+        format=serialization.PrivateFormat.PKCS8,
+        encryption_algorithm=serialization.NoEncryption(),
+    )
+    public_bytes = public_key.public_bytes(
+        encoding=serialization.Encoding.PEM,
+        format=serialization.PublicFormat.SubjectPublicKeyInfo,
+    )
+    private_path.write_bytes(private_bytes)
+    public_path.write_bytes(public_bytes)
+    return private_path, public_path
 
 
 def _coalesce_hash(row: sqlite3.Row) -> str:
@@ -225,6 +290,95 @@ def save_identity(capsule: IdentityCapsule, path: str | Path = DEFAULT_DB_PATH) 
         )
         conn.commit()
         return stored
+    finally:
+        conn.close()
+
+
+def apply_and_record(
+    patch: IdentityPatch,
+    path: str | Path = DEFAULT_DB_PATH,
+    requested_by: str | None = None,
+    approved_by: str | None = None,
+    applied_by: str | None = None,
+) -> IdentityCapsule:
+    from .compiler import apply_patch as apply_patch_compiler
+
+    conn = _connect(path)
+    try:
+        conn.execute("BEGIN IMMEDIATE")
+        latest_row = conn.execute(
+            """
+            SELECT version, capsule_json, capsule_hash
+            FROM identities
+            WHERE agent_id = ?
+            ORDER BY version DESC
+            LIMIT 1
+            """,
+            (patch.agent_id,),
+        ).fetchone()
+        if latest_row is None:
+            raise ValueError(f"agent '{patch.agent_id}' not found")
+
+        current_version = int(latest_row["version"])
+        if patch.from_version != current_version:
+            raise ValueError(
+                "version mismatch: "
+                f"patch from_version={patch.from_version} current version={current_version}"
+            )
+
+        current_capsule = IdentityCapsule.model_validate_json(latest_row["capsule_json"])
+        updated = apply_patch_compiler(current_capsule, patch)
+        now_iso = utc_now_iso()
+        next_version = current_version + 1
+        updated.version = next_version
+        updated.updated_at = datetime.fromisoformat(now_iso)
+        updated.rollback_version = max(1, updated.rollback_version)
+
+        previous_hash = _coalesce_hash(latest_row)
+        capsule_hash = compute_capsule_hash(updated)
+        payload = updated.model_dump_json()
+        conn.execute(
+            """
+            INSERT INTO identities(agent_id, version, capsule_json, capsule_hash, previous_hash, created_at, updated_at)
+            VALUES (?, ?, ?, ?, ?, ?, ?)
+            """,
+            (updated.agent_id, next_version, payload, capsule_hash, previous_hash, now_iso, now_iso),
+        )
+        conn.execute(
+            """
+            INSERT INTO patches(
+                agent_id, from_version, to_version, patch_json, requested_by, approved_by, applied_by, created_at
+            )
+            VALUES (?, ?, ?, ?, ?, ?, ?, ?)
+            """,
+            (
+                updated.agent_id,
+                patch.from_version,
+                next_version,
+                patch.model_dump_json(),
+                requested_by,
+                approved_by,
+                applied_by,
+                now_iso,
+            ),
+        )
+        _record_event(
+            conn,
+            updated.agent_id,
+            "patch_applied",
+            {
+                "from_version": patch.from_version,
+                "to_version": next_version,
+                "capsule_hash": capsule_hash,
+                "previous_hash": previous_hash,
+                "requested_by": requested_by,
+                "approved_by": approved_by,
+                "applied_by": applied_by,
+            },
+            now_iso,
+        )
+        conn.commit()
+        return updated
     finally:
         conn.close()
 
@@ -372,7 +526,12 @@ def export_json(agent_id: str, path: str | Path, db_path: str | Path = DEFAULT_D
     return out_path
 
 
-def import_json(path: str | Path, db_path: str | Path = DEFAULT_DB_PATH, force: bool = False) -> IdentityCapsule:
+def import_json(
+    path: str | Path,
+    db_path: str | Path = DEFAULT_DB_PATH,
+    force_lineage: bool = False,
+    force_hash: bool = False,
+) -> IdentityCapsule:
     payload = json.loads(Path(path).read_text(encoding="utf-8"))
     required = {"agent_id", "version", "capsule_hash", "previous_hash", "exported_at", "capsule"}
     missing = sorted(required.difference(payload.keys()))
@@ -384,8 +543,8 @@ def import_json(path: str | Path, db_path: str | Path = DEFAULT_DB_PATH, force: 
         raise ValueError("import envelope agent_id does not match capsule.agent_id")
 
     computed_hash = compute_capsule_hash(capsule)
-    if payload["capsule_hash"] != computed_hash and not force:
-        raise ValueError("import rejected: capsule_hash mismatch (use --force to override)")
+    if payload["capsule_hash"] != computed_hash and not force_hash:
+        raise ValueError("import rejected: capsule_hash mismatch (use --force-hash to override)")
 
     local = load_identity(capsule.agent_id, db_path)
     local_integrity = load_identity_integrity(capsule.agent_id, db_path)
@@ -393,19 +552,19 @@ def import_json(path: str | Path, db_path: str | Path = DEFAULT_DB_PATH, force: 
     incoming_previous_hash = payload["previous_hash"]
 
     if local is None:
-        if incoming_version != 1 and not force:
+        if incoming_version != 1 and not force_lineage:
             raise ValueError("import rejected: version lineage mismatch (expected version 1 for new agent)")
-        if incoming_previous_hash not in (None, "") and not force:
+        if incoming_previous_hash not in (None, "") and not force_lineage:
             raise ValueError("import rejected: previous_hash must be null for new agent")
     else:
         assert local_integrity is not None
         expected_next = local.version + 1
-        if incoming_version != expected_next and not force:
+        if incoming_version != expected_next and not force_lineage:
             raise ValueError(
                 f"import rejected: version lineage mismatch (expected {expected_next}, got {incoming_version})"
             )
-        if incoming_previous_hash != local_integrity["capsule_hash"] and not force:
-            raise ValueError("import rejected: previous_hash lineage mismatch (use --force to override)")
+        if incoming_previous_hash != local_integrity["capsule_hash"] and not force_lineage:
+            raise ValueError("import rejected: previous_hash lineage mismatch (use --force-lineage to override)")
 
     saved = save_identity(capsule, db_path)
     conn = _connect(db_path)
@@ -417,7 +576,8 @@ def import_json(path: str | Path, db_path: str | Path = DEFAULT_DB_PATH, force: 
             "import",
             {
                 "path": str(Path(path)),
-                "force": force,
+                "force_lineage": force_lineage,
+                "force_hash": force_hash,
                 "imported_version": incoming_version,
                 "imported_capsule_hash": payload["capsule_hash"],
                 "saved_version": saved.version,
@@ -428,3 +588,147 @@ def import_json(path: str | Path, db_path: str | Path = DEFAULT_DB_PATH, force: 
     finally:
         conn.close()
     return saved
+
+
+def load_history(agent_id: str, path: str | Path = DEFAULT_DB_PATH) -> list[dict[str, Any]]:
+    conn = _connect(path)
+    try:
+        identity_rows = conn.execute(
+            """
+            SELECT version, capsule_hash, previous_hash, updated_at
+            FROM identities
+            WHERE agent_id = ?
+            ORDER BY version
+            """,
+            (agent_id,),
+        ).fetchall()
+        patch_rows = conn.execute(
+            """
+            SELECT to_version, patch_json, requested_by, approved_by, applied_by, created_at
+            FROM patches
+            WHERE agent_id = ?
+            ORDER BY to_version
+            """,
+            (agent_id,),
+        ).fetchall()
+    finally:
+        conn.close()
+
+    by_version: dict[int, dict[str, Any]] = {}
+    for row in patch_rows:
+        patch_payload = json.loads(row["patch_json"])
+        by_version[int(row["to_version"])] = {
+            "summary": patch_payload.get("summary", ""),
+            "requested_by": row["requested_by"],
+            "approved_by": row["approved_by"],
+            "applied_by": row["applied_by"],
+            "timestamp": row["created_at"],
+        }
+
+    history: list[dict[str, Any]] = []
+    for row in identity_rows:
+        version = int(row["version"])
+        patch_meta = by_version.get(
+            version,
+            {
+                "summary": "",
+                "requested_by": None,
+                "approved_by": None,
+                "applied_by": None,
+                "timestamp": row["updated_at"],
+            },
+        )
+        history.append(
+            {
+                "version": version,
+                "hash": row["capsule_hash"],
+                "previous_hash": row["previous_hash"],
+                "summary": patch_meta["summary"],
+                "requested_by": patch_meta["requested_by"],
+                "approved_by": patch_meta["approved_by"],
+                "applied_by": patch_meta["applied_by"],
+                "timestamp": patch_meta["timestamp"],
+            }
+        )
+    return history
+
+
+def create_checkpoint(agent_id: str, db_path: str | Path = DEFAULT_DB_PATH) -> Path:
+    integrity = load_identity_integrity(agent_id, db_path)
+    if integrity is None:
+        raise ValueError(f"agent '{agent_id}' not found")
+    ensure_checkpoint_keypair(db_path)
+    private_key = _load_private_key(db_path)
+    public_key = _load_public_key(db_path)
+
+    payload = {
+        "agent_id": integrity["agent_id"],
+        "version": integrity["version"],
+        "capsule_hash": integrity["capsule_hash"],
+        "previous_hash": integrity["previous_hash"],
+        "created_at": utc_now_iso(),
+    }
+    signature = private_key.sign(_canonical_json_bytes(payload))
+    checkpoint = {
+        **payload,
+        "public_key": base64.b64encode(
+            public_key.public_bytes(
+                encoding=serialization.Encoding.Raw,
+                format=serialization.PublicFormat.Raw,
+            )
+        ).decode("utf-8"),
+        "signature": base64.b64encode(signature).decode("utf-8"),
+    }
+    out_path = _checkpoint_path(agent_id, db_path)
+    out_path.parent.mkdir(parents=True, exist_ok=True)
+    out_path.write_text(json.dumps(checkpoint, indent=2), encoding="utf-8")
+    return out_path
+
+
+def verify_checkpoint(agent_id: str, db_path: str | Path = DEFAULT_DB_PATH) -> dict[str, Any]:
+    checkpoint_path = _checkpoint_path(agent_id, db_path)
+    if not checkpoint_path.exists():
+        return {"ok": False, "reason": "checkpoint missing", "checkpoint_path": str(checkpoint_path)}
+
+    private_path = _private_key_path(db_path)
+    public_path = _public_key_path(db_path)
+    if not private_path.exists() or not public_path.exists():
+        return {"ok": False, "reason": "checkpoint keypair missing", "checkpoint_path": str(checkpoint_path)}
+
+    checkpoint = json.loads(checkpoint_path.read_text(encoding="utf-8"))
+    payload_keys = {"agent_id", "version", "capsule_hash", "previous_hash", "created_at"}
+    if not payload_keys.issubset(checkpoint.keys()):
+        return {"ok": False, "reason": "checkpoint payload invalid", "checkpoint_path": str(checkpoint_path)}
+
+    payload = {key: checkpoint[key] for key in payload_keys}
+    try:
+        signature = base64.b64decode(str(checkpoint["signature"]))
+    except Exception:  # noqa: BLE001
+        return {"ok": False, "reason": "checkpoint signature invalid encoding", "checkpoint_path": str(checkpoint_path)}
+
+    try:
+        public_key = _load_public_key(db_path)
+        public_key.verify(signature, _canonical_json_bytes(payload))
+    except (InvalidSignature, ValueError):
+        return {"ok": False, "reason": "checkpoint signature verification failed", "checkpoint_path": str(checkpoint_path)}
+
+    integrity = load_identity_integrity(agent_id, db_path)
+    if integrity is None:
+        return {"ok": False, "reason": "agent not found in DB", "checkpoint_path": str(checkpoint_path)}
+
+    if int(checkpoint["version"]) != int(integrity["version"]):
+        return {"ok": False, "reason": "version mismatch vs checkpoint", "checkpoint_path": str(checkpoint_path)}
+    if str(checkpoint["capsule_hash"]) != str(integrity["capsule_hash"]):
+        return {"ok": False, "reason": "capsule_hash mismatch vs checkpoint", "checkpoint_path": str(checkpoint_path)}
+    if checkpoint.get("previous_hash") != integrity.get("previous_hash"):
+        return {"ok": False, "reason": "previous_hash mismatch vs checkpoint", "checkpoint_path": str(checkpoint_path)}
+
+    return {
+        "ok": True,
+        "reason": "verified",
+        "checkpoint_path": str(checkpoint_path),
+        "agent_id": integrity["agent_id"],
+        "version": integrity["version"],
+        "capsule_hash": integrity["capsule_hash"],
+        "previous_hash": integrity["previous_hash"],
+    }

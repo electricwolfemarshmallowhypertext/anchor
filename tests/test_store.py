@@ -9,12 +9,17 @@ import pytest
 
 from anchor.models import IdentityCapsule, IdentityField, IdentityPatch
 from anchor.store import (
+    CHECKPOINT_PRIVATE_KEY_NAME,
+    CHECKPOINT_PUBLIC_KEY_NAME,
+    apply_and_record,
     append_patch,
+    create_checkpoint,
     export_json,
     import_json,
     init_db,
     load_identity,
     load_identity_integrity,
+    verify_checkpoint,
     rollback,
     save_identity,
 )
@@ -149,6 +154,96 @@ def test_concurrent_saves_do_not_silently_corrupt_versions(tmp_path: Path) -> No
     assert stored_versions == list(range(1, 9))
 
 
+def test_apply_and_record_append_failure_does_not_advance_identity(tmp_path: Path) -> None:
+    db_path = tmp_path / "anchor.db"
+    save_identity(IdentityCapsule(agent_id="demo", purpose="v1"), db_path)
+
+    conn = sqlite3.connect(db_path)
+    try:
+        conn.execute(
+            """
+            INSERT INTO patches(agent_id, from_version, to_version, patch_json, created_at)
+            VALUES (?, ?, ?, ?, ?)
+            """,
+            ("demo", 1, 2, "{}", "2026-01-01T00:00:00+00:00"),
+        )
+        conn.commit()
+    finally:
+        conn.close()
+
+    patch = IdentityPatch(agent_id="demo", from_version=1, summary="attempt")
+    with pytest.raises(sqlite3.IntegrityError):
+        apply_and_record(patch, db_path)
+
+    latest = load_identity("demo", db_path)
+    assert latest is not None
+    assert latest.version == 1
+
+    conn = sqlite3.connect(db_path)
+    try:
+        identities = conn.execute("SELECT COUNT(*) FROM identities WHERE agent_id = ?", ("demo",)).fetchone()[0]
+        patches = conn.execute("SELECT COUNT(*) FROM patches WHERE agent_id = ?", ("demo",)).fetchone()[0]
+        events = conn.execute("SELECT COUNT(*) FROM events WHERE agent_id = ?", ("demo",)).fetchone()[0]
+    finally:
+        conn.close()
+    assert identities == 1
+    assert patches == 1
+    assert events == 1
+
+
+def test_apply_and_record_rejects_stale_from_version_inside_transaction(tmp_path: Path) -> None:
+    db_path = tmp_path / "anchor.db"
+    first = save_identity(IdentityCapsule(agent_id="demo", purpose="v1"), db_path)
+    second = first.model_copy(deep=True)
+    second.purpose = "v2"
+    save_identity(second, db_path)
+
+    stale = IdentityPatch(agent_id="demo", from_version=1, summary="stale")
+    with pytest.raises(ValueError, match="version mismatch"):
+        apply_and_record(stale, db_path)
+
+    conn = sqlite3.connect(db_path)
+    try:
+        identities = conn.execute("SELECT COUNT(*) FROM identities WHERE agent_id = ?", ("demo",)).fetchone()[0]
+        patches = conn.execute("SELECT COUNT(*) FROM patches WHERE agent_id = ?", ("demo",)).fetchone()[0]
+        events = conn.execute("SELECT COUNT(*) FROM events WHERE agent_id = ?", ("demo",)).fetchone()[0]
+    finally:
+        conn.close()
+    assert identities == 2
+    assert patches == 0
+    assert events == 2
+
+
+def test_two_concurrent_applies_one_succeeds_one_version_mismatch(tmp_path: Path) -> None:
+    db_path = tmp_path / "anchor.db"
+    save_identity(IdentityCapsule(agent_id="demo", purpose="v1"), db_path)
+
+    def _run_apply(label: str) -> str:
+        patch = IdentityPatch(agent_id="demo", from_version=1, summary=f"apply {label}")
+        try:
+            apply_and_record(patch, db_path)
+            return "ok"
+        except ValueError as exc:
+            if "version mismatch" in str(exc):
+                return "version_mismatch"
+            raise
+
+    with ThreadPoolExecutor(max_workers=2) as pool:
+        outcomes = sorted(pool.map(_run_apply, ["a", "b"]))
+
+    assert outcomes == ["ok", "version_mismatch"]
+    conn = sqlite3.connect(db_path)
+    try:
+        identities = conn.execute("SELECT COUNT(*) FROM identities WHERE agent_id = ?", ("demo",)).fetchone()[0]
+        patches = conn.execute("SELECT COUNT(*) FROM patches WHERE agent_id = ?", ("demo",)).fetchone()[0]
+        events = conn.execute("SELECT COUNT(*) FROM events WHERE agent_id = ?", ("demo",)).fetchone()[0]
+    finally:
+        conn.close()
+    assert identities == 2
+    assert patches == 1
+    assert events == 2
+
+
 def test_identity_integrity_hash_chain(tmp_path: Path) -> None:
     db_path = tmp_path / "anchor.db"
     first = save_identity(IdentityCapsule(agent_id="demo", purpose="first"), db_path)
@@ -226,7 +321,7 @@ def test_import_rejects_lineage_mismatch_without_force(tmp_path: Path) -> None:
     export_path.write_text(json.dumps(payload, indent=2), encoding="utf-8")
 
     with pytest.raises(ValueError, match="version lineage mismatch"):
-        import_json(export_path, db_path, force=False)
+        import_json(export_path, db_path, force_lineage=False, force_hash=False)
 
 
 def test_import_force_allows_lineage_mismatch(tmp_path: Path) -> None:
@@ -239,8 +334,85 @@ def test_import_force_allows_lineage_mismatch(tmp_path: Path) -> None:
     payload["capsule_hash"] = "invalid"
     export_path.write_text(json.dumps(payload, indent=2), encoding="utf-8")
 
-    imported = import_json(export_path, db_path, force=True)
+    imported = import_json(export_path, db_path, force_lineage=True, force_hash=True)
     latest_integrity = load_identity_integrity("demo", db_path)
     assert imported.version == 2
     assert latest_integrity is not None
     assert latest_integrity["version"] == 2
+
+
+def test_import_force_hash_only_scoped(tmp_path: Path) -> None:
+    db_path = tmp_path / "anchor.db"
+    export_path = tmp_path / "identity.anchor.json"
+    save_identity(IdentityCapsule(agent_id="demo", purpose="v1"), db_path)
+    export_json("demo", export_path, db_path)
+    payload = json.loads(export_path.read_text(encoding="utf-8"))
+    payload["version"] = 2
+    payload["previous_hash"] = payload["capsule_hash"]
+    payload["capsule_hash"] = "invalid"
+    export_path.write_text(json.dumps(payload, indent=2), encoding="utf-8")
+
+    imported = import_json(export_path, db_path, force_hash=True, force_lineage=False)
+    assert imported.version == 2
+
+
+def test_import_force_lineage_only_scoped(tmp_path: Path) -> None:
+    db_path = tmp_path / "anchor.db"
+    export_path = tmp_path / "identity.anchor.json"
+    save_identity(IdentityCapsule(agent_id="demo", purpose="v1"), db_path)
+    export_json("demo", export_path, db_path)
+    payload = json.loads(export_path.read_text(encoding="utf-8"))
+    payload["version"] = 99
+    export_path.write_text(json.dumps(payload, indent=2), encoding="utf-8")
+
+    imported = import_json(export_path, db_path, force_lineage=True, force_hash=False)
+    assert imported.version == 2
+
+
+def test_checkpoint_verify_valid(tmp_path: Path) -> None:
+    db_path = tmp_path / "anchor.db"
+    save_identity(IdentityCapsule(agent_id="demo", purpose="v1"), db_path)
+    create_checkpoint("demo", db_path)
+    result = verify_checkpoint("demo", db_path)
+    assert result["ok"] is True
+
+
+def test_checkpoint_verify_detects_tampered_db(tmp_path: Path) -> None:
+    db_path = tmp_path / "anchor.db"
+    save_identity(IdentityCapsule(agent_id="demo", purpose="v1"), db_path)
+    create_checkpoint("demo", db_path)
+    conn = sqlite3.connect(db_path)
+    try:
+        conn.execute(
+            "UPDATE identities SET capsule_hash = ? WHERE agent_id = ? AND version = 1",
+            ("deadbeef", "demo"),
+        )
+        conn.commit()
+    finally:
+        conn.close()
+    result = verify_checkpoint("demo", db_path)
+    assert result["ok"] is False
+    assert "capsule_hash mismatch" in result["reason"]
+
+
+def test_checkpoint_verify_missing_keypair(tmp_path: Path) -> None:
+    db_path = tmp_path / "anchor.db"
+    save_identity(IdentityCapsule(agent_id="demo", purpose="v1"), db_path)
+    create_checkpoint("demo", db_path)
+    (db_path.parent / CHECKPOINT_PRIVATE_KEY_NAME).unlink()
+    (db_path.parent / CHECKPOINT_PUBLIC_KEY_NAME).unlink()
+    result = verify_checkpoint("demo", db_path)
+    assert result["ok"] is False
+    assert result["reason"] == "checkpoint keypair missing"
+
+
+def test_checkpoint_verify_rotated_version(tmp_path: Path) -> None:
+    db_path = tmp_path / "anchor.db"
+    first = save_identity(IdentityCapsule(agent_id="demo", purpose="v1"), db_path)
+    create_checkpoint("demo", db_path)
+    second = first.model_copy(deep=True)
+    second.purpose = "v2"
+    save_identity(second, db_path)
+    result = verify_checkpoint("demo", db_path)
+    assert result["ok"] is False
+    assert "version mismatch" in result["reason"]
