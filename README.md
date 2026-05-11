@@ -5,12 +5,23 @@ License: Apache-2.0
 
 Anchor gives local AI agents a small, versioned identity file so they stay consistent across sessions, update safely, and roll back bad changes.
 
+![Anchor CLI demo](docs/anchor-cli-demo.png)
+
+Anchor blocks unsafe identity patches, records history, and supports rollback.
+
 ## What Anchor Solves
 
 - Identity drift across sessions, model swaps, and restarts
 - Unsafe memory updates without auditability
 - Inability to inspect what changed, why it changed, and when
 - Lack of rollback when identity updates go wrong
+
+## Current Status
+
+- 121 tests passing (`python -m pytest -q`)
+- Published Ollama model: `tionne/anchor`
+- Real bench baseline committed under `results/`
+- Failure corpus committed under `results/failures/`
 
 ## Install / Dev Setup
 
@@ -42,6 +53,9 @@ pip install -e .[dev]
 anchor init demo
 anchor compile --agent demo --session examples/session.md --out patch.json
 anchor apply --agent demo --patch patch.json
+anchor history demo
+anchor checkpoint create demo
+anchor checkpoint verify demo
 anchor render demo
 anchor rollback demo --version 1
 ```
@@ -57,29 +71,13 @@ python -m evals.run_evals
 python -m pytest -q
 ```
 
-Live benchmark (structured output via Python client, not `ollama run`):
-
-```bash
-python -m evals.run_ollama_benchmark --model tionne/anchor --case 02_explicit_preference_planning_depth
-```
-
-Minimal live publish gate (blocks release if critical cases miss threshold):
-
-```bash
-python -m evals.run_publish_gate --model anchor --repeat 3 --min-pass-rate 0.90
-```
-
-Real bench baseline (live local model path):
+Live baseline command:
 
 ```bash
 python -m bench.run_real_bench --model anchor --repeat 5 --output results/baseline-anchor.json
 ```
 
-Baseline outputs:
-- `results/baseline-anchor.json`
-- `results/baseline-anchor.md`
-
-Baseline metrics:
+Reported metrics:
 - `compile_valid_rate`
 - `positive_case_success_rate`
 - `safety_block_rate`
@@ -127,6 +125,8 @@ anchor import --in identity.anchor.json --force-hash
 - Policy gate runs before writes
 - Structural policy checks run before regex policy checks
 - Integrity hash chain (`capsule_hash`, `previous_hash`) is stored per version
+- Detached signed checkpoints are supported per agent
+- Checkpoint verification detects DB/hash drift against the signed checkpoint
 - Actor metadata (`requested_by`, `approved_by`, `applied_by`) is recorded on apply events
 - Export/import uses an integrity envelope (`agent_id`, `version`, `capsule_hash`, `previous_hash`, `capsule`)
 - Import bypasses are scoped (`--force-lineage`, `--force-hash`) with explicit warnings
@@ -138,6 +138,8 @@ anchor import --in identity.anchor.json --force-hash
 - unsafe policy paths fail closed
 - history is inspectable without SQL
 - import bypasses are explicit and scoped
+- signed checkpoints added
+- failure corpus extraction added
 
 ## Current Limitations
 
@@ -145,4 +147,39 @@ anchor import --in identity.anchor.json --force-hash
 - no multi-agent roles or delegation tokens
 - model patch quality still varies, but compile output is normalized and validated before apply
 - validator/policy are deterministic guardrails, not a complete security boundary
-- integrity chain is tamper-evident inside local storage, not cryptographically signed externally
+- integrity is local-first; signed checkpoints detect local DB drift, but there is no hosted transparency log
+
+## Real Bench
+
+Live benchmark (structured output via Python client, not `ollama run`):
+
+```bash
+python -m evals.run_ollama_benchmark --model tionne/anchor --case 02_explicit_preference_planning_depth
+```
+
+Minimal live publish gate:
+
+```bash
+python -m evals.run_publish_gate --model anchor --repeat 3 --min-pass-rate 0.90
+```
+
+Real bench baseline (live local model path):
+
+```bash
+python -m bench.run_real_bench --model anchor --repeat 5 --output results/baseline-anchor.json
+```
+
+Baseline outputs:
+- `results/baseline-anchor.json`
+- `results/baseline-anchor.md`
+
+Baseline metrics:
+- `compile_valid_rate`
+- `positive_case_success_rate`
+- `safety_block_rate`
+- `unsafe_accept_rate`
+- `timeout_rate`
+- `median_latency_ms`
+- `p95_latency_ms`
+- per-category pass rates
+- failure-class counts
