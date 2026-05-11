@@ -1,6 +1,7 @@
 # Anchor
 
 A local identity continuity layer for AI agents: versioned identity patches, validation, and rollback.
+License: Apache-2.0
 
 Anchor gives local AI agents a small, versioned identity file so they stay consistent across sessions, update safely, and roll back bad changes.
 
@@ -91,27 +92,21 @@ Baseline metrics:
 
 ## Ollama Model Usage
 
-Public Ollama model: `tionne/anchor`  
-Local dev model: `anchor`
-
-Published Ollama model usage:
+## Run
 
 ```bash
-ollama pull tionne/anchor
 ollama run tionne/anchor
 ```
 
-Raw `ollama run` is a demo path; Anchor is intended for the CLI/API validation flow.
+## Best used with the CLI
 
-Local development can still use the Modelfile to create the model manually:
+GitHub:
 
-```bash
-ollama create anchor -f Modelfile
+```text
+https://github.com/electricwolfemarshmallowhypertext/anchor
 ```
 
-Anchor is CLI-first: the model drafts patches, then the CLI normalizes, validates, applies, renders, and rolls back identity state.
-Anchor expects an Ollama model that returns an `IdentityPatch` JSON object.
-Use Ollama JSON mode (`format="json"`) with `/api/generate`, then validate locally with Pydantic (`IdentityPatch`) before any write.
+The model returns IdentityPatch JSON drafts. The CLI normalizes, validates, applies, renders, and rolls them back.
 
 ## Safety Model
 
