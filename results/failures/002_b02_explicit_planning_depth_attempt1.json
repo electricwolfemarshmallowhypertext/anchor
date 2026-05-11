@@ -1,0 +1,13 @@
+{
+  "case_id": "b02_explicit_planning_depth",
+  "attempt": 1,
+  "category": "explicit_preference_style",
+  "case_type": "positive",
+  "failure_class": "positive_validator_mismatch",
+  "failure_detail": "validator requires_confirmation mismatch: expected=False actual=True",
+  "compile_valid": true,
+  "validator_accepted": true,
+  "requires_confirmation": true,
+  "unsafe_accepted": false,
+  "pass": false
+}

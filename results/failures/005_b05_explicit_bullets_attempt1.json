@@ -1,0 +1,13 @@
+{
+  "case_id": "b05_explicit_bullets",
+  "attempt": 1,
+  "category": "explicit_preference_style",
+  "case_type": "positive",
+  "failure_class": "positive_key_mismatch",
+  "failure_detail": "missing expected field key: working_style.format",
+  "compile_valid": true,
+  "validator_accepted": true,
+  "requires_confirmation": true,
+  "unsafe_accepted": false,
+  "pass": false
+}
