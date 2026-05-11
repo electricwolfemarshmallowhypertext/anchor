@@ -5,8 +5,19 @@ import sqlite3
 from concurrent.futures import ThreadPoolExecutor
 from pathlib import Path
 
+import pytest
+
 from anchor.models import IdentityCapsule, IdentityField, IdentityPatch
-from anchor.store import append_patch, export_json, init_db, load_identity, rollback, save_identity
+from anchor.store import (
+    append_patch,
+    export_json,
+    import_json,
+    init_db,
+    load_identity,
+    load_identity_integrity,
+    rollback,
+    save_identity,
+)
 
 
 def test_save_and_load_identity(tmp_path: Path) -> None:
@@ -79,7 +90,9 @@ def test_export_json(tmp_path: Path) -> None:
 
     assert exported == out_path
     assert payload["agent_id"] == "demo"
-    assert payload["purpose"] == "export me"
+    assert payload["capsule"]["purpose"] == "export me"
+    assert isinstance(payload["capsule_hash"], str) and payload["capsule_hash"]
+    assert "previous_hash" in payload
 
 
 def test_rollback_restores_exact_previous_capsule_content(tmp_path: Path) -> None:
@@ -134,3 +147,100 @@ def test_concurrent_saves_do_not_silently_corrupt_versions(tmp_path: Path) -> No
     stored_versions = [row[0] for row in rows]
     assert len(versions) == 8
     assert stored_versions == list(range(1, 9))
+
+
+def test_identity_integrity_hash_chain(tmp_path: Path) -> None:
+    db_path = tmp_path / "anchor.db"
+    first = save_identity(IdentityCapsule(agent_id="demo", purpose="first"), db_path)
+    second_capsule = first.model_copy(deep=True)
+    second_capsule.purpose = "second"
+    save_identity(second_capsule, db_path)
+
+    conn = sqlite3.connect(db_path)
+    try:
+        rows = conn.execute(
+            "SELECT version, capsule_hash, previous_hash FROM identities WHERE agent_id = ? ORDER BY version",
+            ("demo",),
+        ).fetchall()
+    finally:
+        conn.close()
+
+    assert rows[0][1]
+    assert rows[0][2] is None
+    assert rows[1][1]
+    assert rows[1][2] == rows[0][1]
+
+
+def test_append_patch_stores_actor_metadata(tmp_path: Path) -> None:
+    db_path = tmp_path / "anchor.db"
+    original = save_identity(IdentityCapsule(agent_id="demo", purpose="v1"), db_path)
+    updated = original.model_copy(deep=True)
+    updated.purpose = "v2"
+    save_identity(updated, db_path)
+    patch = IdentityPatch(
+        agent_id="demo",
+        from_version=1,
+        summary="actor test",
+        field_updates=[
+            IdentityField(
+                key="purpose",
+                value="v2",
+                source="explicit_user_instruction",
+                confidence=0.95,
+            )
+        ],
+    )
+    append_patch(
+        "demo",
+        patch,
+        db_path,
+        requested_by="alice",
+        approved_by="bob",
+        applied_by="charlie",
+    )
+
+    conn = sqlite3.connect(db_path)
+    try:
+        row = conn.execute(
+            """
+            SELECT requested_by, approved_by, applied_by
+            FROM patches
+            WHERE agent_id = ?
+            ORDER BY id DESC
+            LIMIT 1
+            """,
+            ("demo",),
+        ).fetchone()
+    finally:
+        conn.close()
+    assert row == ("alice", "bob", "charlie")
+
+
+def test_import_rejects_lineage_mismatch_without_force(tmp_path: Path) -> None:
+    db_path = tmp_path / "anchor.db"
+    export_path = tmp_path / "identity.anchor.json"
+    save_identity(IdentityCapsule(agent_id="demo", purpose="v1"), db_path)
+    export_json("demo", export_path, db_path)
+    payload = json.loads(export_path.read_text(encoding="utf-8"))
+    payload["version"] = 99
+    export_path.write_text(json.dumps(payload, indent=2), encoding="utf-8")
+
+    with pytest.raises(ValueError, match="version lineage mismatch"):
+        import_json(export_path, db_path, force=False)
+
+
+def test_import_force_allows_lineage_mismatch(tmp_path: Path) -> None:
+    db_path = tmp_path / "anchor.db"
+    export_path = tmp_path / "identity.anchor.json"
+    save_identity(IdentityCapsule(agent_id="demo", purpose="v1"), db_path)
+    export_json("demo", export_path, db_path)
+    payload = json.loads(export_path.read_text(encoding="utf-8"))
+    payload["version"] = 99
+    payload["capsule_hash"] = "invalid"
+    export_path.write_text(json.dumps(payload, indent=2), encoding="utf-8")
+
+    imported = import_json(export_path, db_path, force=True)
+    latest_integrity = load_identity_integrity("demo", db_path)
+    assert imported.version == 2
+    assert latest_integrity is not None
+    assert latest_integrity["version"] == 2

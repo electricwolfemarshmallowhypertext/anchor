@@ -8,8 +8,19 @@ from pathlib import Path
 from .compiler import apply_patch, compile_patch, patch_to_json
 from .models import IdentityCapsule, IdentityPatch
 from .ollama_client import OllamaClient
+from .policy import evaluate_policy
 from .renderer import render_identity_block
-from .store import DEFAULT_DB_PATH, append_patch, export_json, init_db, load_identity, rollback, save_identity
+from .store import (
+    DEFAULT_DB_PATH,
+    append_patch,
+    export_json,
+    import_json,
+    init_db,
+    load_identity,
+    load_identity_integrity,
+    rollback,
+    save_identity,
+)
 from .validator import validate_patch
 
 
@@ -70,18 +81,41 @@ def cmd_apply(args: argparse.Namespace) -> int:
     capsule = _must_load_identity(args.agent, db_path)
     patch_payload = json.loads(Path(args.patch).read_text(encoding="utf-8"))
     patch = IdentityPatch.model_validate(patch_payload)
+    if patch.from_version != capsule.version:
+        print(
+            "apply failed: version mismatch\n"
+            f"- patch from_version={patch.from_version}\n"
+            f"- current version={capsule.version}"
+        )
+        print("No changes were written.")
+        return 1
 
     result = validate_patch(capsule, patch)
     if not result.accepted:
-        print("patch rejected:")
+        print("apply failed: validator rejection")
         for err in result.errors:
             print(f"- {err}")
         print("No changes were written.")
         return 1
 
     if result.requires_confirmation and not args.confirm_risky:
-        print("patch requires confirmation:")
+        print("apply failed: confirmation required")
         for reason in result.confirmation_reasons:
+            print(f"- {reason}")
+        print("re-run with --confirm-risky to apply")
+        print("No changes were written.")
+        return 1
+
+    policy = evaluate_policy(patch)
+    if policy.rejected:
+        print("apply failed: policy rejection")
+        for reason in policy.reasons:
+            print(f"- {reason}")
+        print("No changes were written.")
+        return 1
+    if policy.requires_confirmation and not args.confirm_risky:
+        print("apply failed: confirmation required")
+        for reason in policy.reasons:
             print(f"- {reason}")
         print("re-run with --confirm-risky to apply")
         print("No changes were written.")
@@ -89,7 +123,14 @@ def cmd_apply(args: argparse.Namespace) -> int:
 
     updated = apply_patch(capsule, patch)
     saved = save_identity(updated, db_path)
-    append_patch(args.agent, patch, db_path)
+    append_patch(
+        args.agent,
+        patch,
+        db_path,
+        requested_by=args.requested_by,
+        approved_by=args.approved_by,
+        applied_by=args.applied_by,
+    )
     print(f"Patch applied. Agent '{saved.agent_id}' is now at version {saved.version}.")
     print(f"Next: anchor render {saved.agent_id}")
     return 0
@@ -97,7 +138,11 @@ def cmd_apply(args: argparse.Namespace) -> int:
 
 def cmd_show(args: argparse.Namespace) -> int:
     capsule = _must_load_identity(args.agent_id, _db_path(args))
-    print(capsule.model_dump_json(indent=2))
+    payload = {
+        "capsule": capsule.model_dump(mode="json"),
+        "integrity": load_identity_integrity(args.agent_id, _db_path(args)),
+    }
+    print(json.dumps(payload, indent=2))
     print(f"\nTip: run `anchor render {args.agent_id}` to copy a prompt-ready identity block.")
     return 0
 
@@ -125,6 +170,12 @@ def cmd_export(args: argparse.Namespace) -> int:
     return 0
 
 
+def cmd_import(args: argparse.Namespace) -> int:
+    imported = import_json(args.input, _db_path(args), force=args.force)
+    print(f"imported agent '{imported.agent_id}' at local version {imported.version}")
+    return 0
+
+
 def build_parser() -> argparse.ArgumentParser:
     parser = argparse.ArgumentParser(prog="anchor")
     parser.add_argument("--db", default=str(DEFAULT_DB_PATH), help="SQLite database path")
@@ -149,6 +200,9 @@ def build_parser() -> argparse.ArgumentParser:
     apply_parser.add_argument("--agent", required=True)
     apply_parser.add_argument("--patch", required=True)
     apply_parser.add_argument("--confirm-risky", action="store_true")
+    apply_parser.add_argument("--requested-by")
+    apply_parser.add_argument("--approved-by")
+    apply_parser.add_argument("--applied-by")
     apply_parser.set_defaults(func=cmd_apply)
 
     show_parser = subparsers.add_parser("show")
@@ -168,6 +222,11 @@ def build_parser() -> argparse.ArgumentParser:
     export_parser.add_argument("agent_id")
     export_parser.add_argument("--out", required=True)
     export_parser.set_defaults(func=cmd_export)
+
+    import_parser = subparsers.add_parser("import")
+    import_parser.add_argument("--in", dest="input", required=True)
+    import_parser.add_argument("--force", action="store_true")
+    import_parser.set_defaults(func=cmd_import)
 
     return parser
 
